@@ -402,13 +402,13 @@ int NinjaMain::ToolGraph(const Options* options, int argc, char* argv[]) {
       printf(
 "Usage '-t graph [options] [targets]\n"
 "\n"
-"output graphviz dot file for targets.\n"
+"Output graphviz dot file for targets.\n"
 "For smaller outputs try the --depth option.\n"
-"  example:\n"
+"  Example:\n"
 "   ninja -t graph mytarget | dot -Tsvg -ograph.svg\n"
 "Options:\n"
 "  -h, --help   Print this message.\n"
-"  -d, --depth  limit the dependency depth to inputs.\n"
+"  -d, --depth=DEPTH  Limit depth of each target dependencies sub-tree.\n"
       );
       // clang-format on
       return 1;
@@ -426,8 +426,8 @@ int NinjaMain::ToolGraph(const Options* options, int argc, char* argv[]) {
 
   GraphViz graph(&state_, &disk_interface_);
   graph.Start();
-  for (vector<Node*>::const_iterator n = nodes.begin(); n != nodes.end(); ++n)
-    graph.AddTarget(*n, depth);
+  for (const Node* node : nodes)
+    graph.AddTarget(node, depth);
   graph.Finish();
 
   return 0;
@@ -747,16 +747,15 @@ int NinjaMain::ToolWinCodePage(const Options* options, int argc, char* argv[]) {
 #endif
 
 enum PrintCommandMode { PCM_Single, PCM_All };
-void PrintCommands(Edge* edge, EdgeSet* seen, PrintCommandMode mode) {
+void PrintCommands(const Edge* edge, EdgeSet* seen, PrintCommandMode mode) {
   if (!edge)
     return;
   if (!seen->insert(edge).second)
     return;
 
   if (mode == PCM_All) {
-    for (vector<Node*>::iterator in = edge->inputs_.begin();
-         in != edge->inputs_.end(); ++in)
-      PrintCommands((*in)->in_edge(), seen, mode);
+    for (const auto in : edge->inputs_)
+      PrintCommands(in->in_edge(), seen, mode);
   }
 
   if (!edge->is_phony())
