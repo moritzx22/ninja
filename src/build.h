@@ -208,6 +208,8 @@ struct Builder {
   /// Clean up after interrupted commands by deleting output files.
   void Cleanup();
 
+  void ActivateDyndep(std::vector<Node*> targets);
+
   Node* AddTarget(const std::string& name, std::string* err);
 
   /// Add a target to the build, scanning dependencies.

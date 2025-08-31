@@ -1611,6 +1611,8 @@ ExitStatus NinjaMain::RunBuild(int argc, char** argv, Status* status) {
     builder.SetJobserverClient(std::move(jobserver_client));
   }
 
+  // load all Dyndeps that are available and reachable from targets
+  builder.ActivateDyndep(targets);
   for (size_t i = 0; i < targets.size(); ++i) {
     if (!builder.AddTarget(targets[i], &err)) {
       if (!err.empty()) {

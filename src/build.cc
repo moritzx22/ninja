@@ -76,6 +76,59 @@ bool DryRunCommandRunner::WaitForCommand(Result* result) {
    return true;
 }
 
+
+
+
+
+class GraphActivateDyndep {
+ public:
+  static void ActivateDyndep(State* state_, DiskInterface* disk_interface_,
+                             std::vector<Node*>& nodes);
+
+ private:
+  GraphActivateDyndep(State* state_, DiskInterface* disk_interface_)
+      : dyndep_loader_(state_, disk_interface_) {}
+
+  void AddTarget(Node* node);
+
+  DyndepLoader dyndep_loader_;
+  std::set<Node*> visited_nodes_;
+  EdgeSet visited_edges_;
+};
+
+void GraphActivateDyndep::ActivateDyndep(State* state_,
+                                         DiskInterface* disk_interface_,
+                                         std::vector<Node*>& nodes) {
+  GraphActivateDyndep temp(state_, disk_interface_);
+
+  for (auto node : nodes)
+    temp.AddTarget(node);
+}
+
+void GraphActivateDyndep::AddTarget(Node* node) {
+  if (!visited_nodes_.insert(node).second)
+    return;
+
+  Edge* edge = node->in_edge();
+
+  if (!edge)
+    return;
+
+  if (!visited_edges_.insert(edge).second)
+    return;
+
+  if (edge->dyndep_ && edge->dyndep_->dyndep_pending()) {
+    std::string err;
+    if (!dyndep_loader_.LoadDyndeps(edge->dyndep_, &err)) {
+      Warning("%s\n", err.c_str());
+    }
+  }
+
+  for (auto in : edge->inputs_) {
+    AddTarget(in);
+  }
+}
+
 }  // namespace
 
 Plan::Plan(Builder* builder)
@@ -656,6 +709,10 @@ void Builder::Cleanup() {
   string err;
   if (disk_interface_->Stat(lock_file_path_, &err) > 0)
     disk_interface_->RemoveFile(lock_file_path_);
+}
+
+void Builder::ActivateDyndep(std::vector<Node*> targets) {
+  GraphActivateDyndep::ActivateDyndep(state_, disk_interface_, targets);
 }
 
 Node* Builder::AddTarget(const string& name, string* err) {
