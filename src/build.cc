@@ -120,7 +120,7 @@ void GraphActivateDyndep::AddTarget(Node* node) {
   if (edge->dyndep_ && edge->dyndep_->dyndep_pending()) {
     std::string err;
     if (!dyndep_loader_.LoadDyndeps(edge->dyndep_, &err)) {
-      Warning("%s\n", err.c_str());
+      ;//Warning("%s\n", err.c_str());
     }
   }
 
