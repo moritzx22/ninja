@@ -22,6 +22,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <chrono>
+#include <iostream>
 
 #ifdef _WIN32
 #include "getopt.h"
@@ -1590,6 +1592,7 @@ std::unique_ptr<Jobserver::Client> NinjaMain::SetupJobserverClient(
 }
 
 ExitStatus NinjaMain::RunBuild(int argc, char** argv, Status* status) {
+  auto start = std::chrono::high_resolution_clock::now();
   std::string err;
   std::vector<Node*> targets;
   if (!CollectTargetsFromArgs(argc, argv, &targets, &err)) {
@@ -1611,8 +1614,17 @@ ExitStatus NinjaMain::RunBuild(int argc, char** argv, Status* status) {
     builder.SetJobserverClient(std::move(jobserver_client));
   }
 
+  auto end = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double, std::milli> duration = end - start;
+  std::cout << "runtime read       : " << duration.count() << " ms\n";
+
   // load all Dyndeps that are available and reachable from targets
+  start = std::chrono::high_resolution_clock::now();
   builder.ActivateDyndep(targets);
+  end = std::chrono::high_resolution_clock::now();
+  duration = end - start;
+  std::cout << "runtime ActivateDyndep: " << duration.count() << " ms\n";
+  start = std::chrono::high_resolution_clock::now();
   for (size_t i = 0; i < targets.size(); ++i) {
     if (!builder.AddTarget(targets[i], &err)) {
       if (!err.empty()) {
@@ -1624,6 +1636,10 @@ ExitStatus NinjaMain::RunBuild(int argc, char** argv, Status* status) {
       }
     }
   }
+  end = std::chrono::high_resolution_clock::now();
+  duration = end - start;
+  std::cout << "runtime AddTarget     : " << duration.count() << " ms\n";
+  start = std::chrono::high_resolution_clock::now();
 
   // Make sure restat rules do not see stale timestamps.
   disk_interface_.AllowStatCache(false);
@@ -1632,6 +1648,9 @@ ExitStatus NinjaMain::RunBuild(int argc, char** argv, Status* status) {
     if (config_.verbosity != BuildConfig::NO_STATUS_UPDATE) {
       status->Info("no work to do.");
     }
+    end = std::chrono::high_resolution_clock::now();
+    duration = end - start;
+    std::cout << "runtime ExitSuccess   : " << duration.count() << " ms\n";
     return ExitSuccess;
   }
 
@@ -1642,7 +1661,9 @@ ExitStatus NinjaMain::RunBuild(int argc, char** argv, Status* status) {
       return ExitInterrupted;
     }
   }
-
+  end = std::chrono::high_resolution_clock::now();
+  duration = end - start;
+  std::cout << "runtime exit_status   : " << duration.count() << " ms\n";
   return exit_status;
 }
 
