@@ -113,6 +113,13 @@ void propagateDirty::process(Edge* const edge) {
 bool DependencyScan::RecomputeNodeDirty(Node* node, std::vector<Node*>* stack,
                                         std::vector<Node*>* validation_nodes,
                                         string* err) {
+  bool dummy(false);
+  return RecomputeNodeDirty(node, stack, validation_nodes, dummy, err);
+}
+
+bool DependencyScan::RecomputeNodeDirty(Node* node, std::vector<Node*>* stack,
+                                        std::vector<Node*>* validation_nodes, bool& dyndepLoadedPath,
+                                        string* err) {
   Edge* edge = node->in_edge();
   if (!edge) {
     // If we already visited this leaf node then we are done.
@@ -158,7 +165,8 @@ bool DependencyScan::RecomputeNodeDirty(Node* node, std::vector<Node*>* stack,
     //   Later during the build the dyndep file will become ready and be
     //   loaded to update this edge before it can possibly be scheduled.
     if (edge->dyndep_ && edge->dyndep_->dyndep_pending()) {
-      if (!RecomputeNodeDirty(edge->dyndep_, stack, validation_nodes, err))
+      if (!RecomputeNodeDirty(edge->dyndep_, stack, validation_nodes,
+                              dyndepLoadedPath, err))
         return false;
 
       if (!edge->dyndep_->in_edge() ||
@@ -199,12 +207,15 @@ bool DependencyScan::RecomputeNodeDirty(Node* node, std::vector<Node*>* stack,
   validation_nodes->insert(validation_nodes->end(),
       edge->validations_.begin(), edge->validations_.end());
 
+  if (dyndepLoaded)
+    dyndepLoadedPath = true;
   // Visit all inputs; we're dirty if any of the inputs are dirty.
   Node* most_recent_input = NULL;
   for (vector<Node*>::iterator i = edge->inputs_.begin();
        i != edge->inputs_.end(); ++i) {
     // Visit this input.
-    if (!RecomputeNodeDirty(*i, stack, validation_nodes, err))
+    if (!RecomputeNodeDirty(*i, stack, validation_nodes, dyndepLoadedPath,
+                            err))
       return false;
 
     // If an input is not ready, neither are our outputs.
@@ -213,13 +224,21 @@ bool DependencyScan::RecomputeNodeDirty(Node* node, std::vector<Node*>* stack,
         edge->outputs_ready_ = false;
     }
 
-    if (!edge->is_order_only(i - edge->inputs_.begin())) {
+    if ([edge, dyndepLoadedPath, i]() {
+          if (!dyndepLoadedPath)
+            return !edge->is_order_only(i - edge->inputs_.begin());
+          for (std::size_t index = 0; index < edge->inputs_.size(); ++index) {
+            if (!edge->is_order_only(index))
+              return true;
+          }
+          return false;
+        }()) {
       // If a regular input is dirty (or missing), we're dirty.
       // Otherwise consider mtime.
       if ((*i)->dirty()) {
         explanations_.Record(node, "%s is dirty", (*i)->path().c_str());
         dirty = true;
-      } else {
+      } else if (!edge->is_order_only(i - edge->inputs_.begin())) {
         if (!most_recent_input || (*i)->mtime() > most_recent_input->mtime()) {
           most_recent_input = *i;
         }
