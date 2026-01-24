@@ -79,6 +79,14 @@ struct Node {
     return exists_ == ExistenceStatusExists;
   }
 
+  void MarkExists() {
+    exists_ = ExistenceStatusExists;
+  }
+
+  bool missing() const {
+    return exists_ == ExistenceStatusMissing;
+  }
+
   bool status_known() const {
     return exists_ != ExistenceStatusUnknown;
   }
