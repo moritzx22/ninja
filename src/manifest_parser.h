@@ -22,6 +22,7 @@
 
 struct BindingEnv;
 struct EvalString;
+struct EvalStringProp;
 
 enum DupeEdgeAction {
   kDupeEdgeActionWarn,
@@ -71,7 +72,8 @@ private:
   // to save on the otherwise constant memory reallocation.
   // subparser_ is reused solely to get better reuse out ins_/outs_/validation_.
   std::unique_ptr<ManifestParser> subparser_;
-  std::vector<EvalString> ins_, outs_, validations_;
+  std::vector<EvalStringProp> ins_;
+  std::vector<EvalString>  outs_, validations_;
 };
 
 #endif  // NINJA_MANIFEST_PARSER_H_

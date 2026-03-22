@@ -62,6 +62,10 @@ private:
   std::string single_token_;
 };
 
+struct EvalStringProp : public EvalString {
+   bool dyndep_awaited_ = false;
+};
+
 /// An invocable build command and associated metadata (description, etc.).
 struct Rule {
   explicit Rule(const std::string& name) : name_(name) {}

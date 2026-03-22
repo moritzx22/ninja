@@ -132,6 +132,14 @@ void State::AddIn(Edge* edge, StringPiece path, uint64_t slash_bits) {
   node->AddOutEdge(edge);
 }
 
+void State::AddInDD(Edge* edge, StringPiece path, uint64_t slash_bits) {
+  Node* node = GetNode(path, slash_bits);
+  node->set_dyndep_awaited();
+  node->set_generated_by_dep_loader(false);
+  edge->inputs_.push_back(node);
+  node->AddOutEdge(edge);
+}
+
 bool State::AddOut(Edge* edge, StringPiece path, uint64_t slash_bits,
                    std::string* err) {
   Node* node = GetNode(path, slash_bits);

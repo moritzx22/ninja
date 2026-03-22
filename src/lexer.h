@@ -23,6 +23,7 @@
 #endif
 
 struct EvalString;
+struct EvalStringProp;
 
 struct Lexer {
   Lexer() {}
@@ -81,6 +82,13 @@ struct Lexer {
     return ReadEvalString(path, true, err);
   }
 
+  /// Read a path (complete with $escapes).
+  /// Returns false only on error, returned path may be empty if a delimiter
+  /// (space, newline) is hit.
+  bool ReadPath(EvalStringProp* path, std::string* err) {
+    return ReadEvalStringProp(path, true, err);
+  }
+
   /// Read the value side of a var = value line (complete with $escapes).
   /// Returns false only on error.
   bool ReadVarValue(EvalString* value, std::string* err) {
@@ -100,6 +108,7 @@ private:
 
   /// Read a $-escaped string.
   bool ReadEvalString(EvalString* eval, bool path, std::string* err);
+  bool ReadEvalStringProp(EvalStringProp* eval, bool path, std::string* err);
 
   StringPiece filename_;
   StringPiece input_;

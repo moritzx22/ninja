@@ -261,7 +261,7 @@ bool ManifestParser::ParseEdge(string* err) {
 
   for (;;) {
     // XXX should we require one path here?
-    EvalString in;
+    EvalStringProp in;
     if (!lexer_.ReadPath(&in, err))
       return false;
     if (in.empty())
@@ -273,7 +273,7 @@ bool ManifestParser::ParseEdge(string* err) {
   int implicit = 0;
   if (lexer_.PeekToken(Lexer::PIPE)) {
     for (;;) {
-      EvalString in;
+      EvalStringProp in;
       if (!lexer_.ReadPath(&in, err))
         return false;
       if (in.empty())
@@ -287,7 +287,7 @@ bool ManifestParser::ParseEdge(string* err) {
   int order_only = 0;
   if (lexer_.PeekToken(Lexer::PIPE2)) {
     for (;;) {
-      EvalString in;
+      EvalStringProp in;
       if (!lexer_.ReadPath(&in, err))
         return false;
       if (in.empty())
@@ -359,13 +359,16 @@ bool ManifestParser::ParseEdge(string* err) {
   edge->implicit_outs_ = implicit_outs;
 
   edge->inputs_.reserve(ins_.size());
-  for (vector<EvalString>::iterator i = ins_.begin(); i != ins_.end(); ++i) {
+  for (vector<EvalStringProp>::iterator i = ins_.begin(); i != ins_.end(); ++i) {
     string path = i->Evaluate(env);
     if (path.empty())
       return lexer_.Error("empty path", err);
     uint64_t slash_bits;
     CanonicalizePath(&path, &slash_bits);
-    state_->AddIn(edge, path, slash_bits);
+    if (i->dyndep_awaited_)
+      state_->AddInDD(edge, path, slash_bits);
+    else
+      state_->AddIn(edge, path, slash_bits);
   }
   edge->implicit_deps_ = implicit;
   edge->order_only_deps_ = order_only;

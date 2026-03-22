@@ -298,3 +298,114 @@ bool Lexer::ReadEvalString(EvalString* eval, bool path, string* err) {
   // Non-path strings end in newlines, so there's no whitespace to eat.
   return true;
 }
+
+bool Lexer::ReadEvalStringProp(EvalStringProp* eval, bool path, string* err) {
+  const char* p = ofs_;
+  const char* q;
+  const char* start;
+  for (;;) {
+    start = p;
+    /*!re2c
+    [^$ :\r\n|\000]+ {
+    // markerX1
+      eval->AddText(StringPiece(start, p - start));
+      continue;
+    }
+    ([^$ :\r\n|\000]+)"$dd" {
+      // markerX
+      eval->AddText(StringPiece(start, p - start - 3));
+      eval->dyndep_awaited_ =  true;
+      continue;
+    }
+    "\r\n" {
+      if (path)
+        p = start;
+      break;
+    }
+    [ :|\n] {
+      if (path) {
+        p = start;
+        break;
+      } else {
+        if (*start == '\n')
+          break;
+        eval->AddText(StringPiece(start, 1));
+        continue;
+      }
+    }
+    "$$" {
+      eval->AddText(StringPiece("$", 1));
+      continue;
+    }
+    "$$$dd" {
+      eval->AddText(StringPiece("$", 1));
+      eval->dyndep_awaited_ =  true;
+      continue;
+    }
+    "$ " {
+      eval->AddText(StringPiece(" ", 1));
+      continue;
+    }
+    "$\r\n"[ ]* {
+      continue;
+    }
+    "$\n"[ ]* {
+      continue;
+    }
+    "${"varname"}" {
+      eval->AddSpecial(StringPiece(start + 2, p - start - 3));
+      continue;
+    }
+    "${"varname"}$dd" {
+      eval->AddSpecial(StringPiece(start + 2, p - start - 6));
+      eval->dyndep_awaited_ =  true;
+      continue;
+    }
+    "$"simple_varname {
+      eval->AddSpecial(StringPiece(start + 1, p - start - 1));
+      continue;
+    }
+    "$"simple_varname"$dd" {
+      eval->AddSpecial(StringPiece(start + 1, p - start - 4));
+      eval->dyndep_awaited_ =  true;
+      continue;
+    }
+    "$:" {
+      eval->AddText(StringPiece(":", 1));
+      continue;
+    }
+    "$^" {
+      if (!newline_version_checked_)
+      {
+        if ((manifest_version_major < kMinNewlineEscapeVersionMajor) ||
+            (manifest_version_major = kMinNewlineEscapeVersionMajor &&
+             manifest_version_minor < kMinNewlineEscapeVersionMinor))
+        {
+          return Error("using $^ escape requires specifying 'ninja_required_version' with version greater or equal 1.14", err);
+        }
+        newline_version_checked_ = true;
+      }
+      eval->AddText(StringPiece("\n", 1));
+      continue;
+    }
+    "$". {
+      last_token_ = start;
+      return Error("bad $-escape (literal $ must be written as $$)", err);
+    }
+    nul {
+      last_token_ = start;
+      return Error("unexpected EOF", err);
+    }
+    [^] {
+      last_token_ = start;
+      return Error(DescribeLastError(), err);
+    }
+    */
+  }
+  last_token_ = start;
+  ofs_ = p;
+  if (path)
+    EatWhitespace();
+  // Non-path strings end in newlines, so there's no whitespace to eat.
+  return true;
+}

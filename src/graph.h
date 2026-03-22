@@ -75,6 +75,14 @@ struct Node {
     return exists_ == ExistenceStatusExists;
   }
 
+  void MarkExists() {
+    exists_ = ExistenceStatusExists;
+  }
+
+  bool missing() const {
+    return exists_ == ExistenceStatusMissing;
+  }
+
   bool status_known() const {
     return exists_ != ExistenceStatusUnknown;
   }
@@ -96,6 +104,9 @@ struct Node {
 
   bool dyndep_pending() const { return dyndep_pending_; }
   void set_dyndep_pending(bool pending) { dyndep_pending_ = pending; }
+
+  void set_dyndep_awaited() { dyndep_awaited_ = true; }
+  bool dyndep_awaited() const {return dyndep_awaited_; }
 
   Edge* in_edge() const { return in_edge_; }
   void set_in_edge(Edge* edge) { in_edge_ = edge; }
@@ -156,6 +167,8 @@ private:
   /// all nodes have this flag set to true, since the deps and build logs
   /// can be loaded before the manifest.
   bool generated_by_dep_loader_ = true;
+
+  bool dyndep_awaited_ = false;
 
   /// A dense integer id for the node, assigned and used by DepsLog.
   int id_ = -1;

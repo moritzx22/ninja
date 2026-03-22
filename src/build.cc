@@ -105,7 +105,7 @@ bool Plan::AddSubTarget(const Node* node, const Node* dependent, string* err,
      // file. In the first case, a dirty flag means the file is missing,
      // and the build should stop. In the second, do not do anything here
      // since there is no producing edge to add to the plan.
-     if (node->dirty() && !node->generated_by_dep_loader()) {
+     if (node->dirty() && !node->generated_by_dep_loader() && !node->dyndep_awaited()) {
        string referenced;
        if (dependent)
          referenced = ", needed by '" + dependent->path() + "',";
@@ -816,9 +816,26 @@ ExitStatus Builder::Build(string* err) {
 }
 
 bool Builder::StartEdge(Edge* edge, string* err) {
+  using namespace std::string_literals;
   METRIC_RECORD("StartEdge");
   if (edge->is_phony())
     return true;
+
+  // Late validation: verify that dyndep‑awaited inputs are present.
+  bool failure = false;
+  for (const auto input : edge->inputs_) {
+    if (input->dyndep_awaited() && input->missing()) {
+      string referenced;
+      if (!edge->outputs_.empty())
+        referenced += " needed by '" + edge->outputs_.front()->path() + "',";
+      *err += (failure ? "\n" + std::string(22, ' ') : "") + "'"s +
+              input->path() + "'" + referenced +
+              " missing and no known rule to make it";
+      failure = true;
+    }
+  }
+  if (failure)
+    return false;
 
   int64_t start_time_millis = GetTimeMillis() - start_time_millis_;
   running_edges_.insert(make_pair(edge, start_time_millis));
@@ -941,6 +958,12 @@ bool Builder::FinishCommand(CommandRunner::Result* result, string* err) {
     if (node_cleaned) {
       record_mtime = edge->command_start_time_;
     }
+  }
+
+  // Refresh output file status to support later dyndep existence checks.
+  // https://github.com/ninja-build/ninja/issues/2573
+  for (auto o : edge->outputs_) {
+    o->MarkExists();
   }
 
   if (!plan_.EdgeFinished(edge, Plan::kEdgeSucceeded, err))
