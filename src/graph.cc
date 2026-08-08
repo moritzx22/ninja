@@ -97,8 +97,7 @@ class RecomputeOutputsDirtyCache {
  public:
   RecomputeOutputsDirtyCache(BuildLog* build_log,
                              OptionalExplanations& explanations, Edge* edge)
-      : buildLog_(build_log), explanations_(explanations), edge_(edge),
-        logEntry_(edge->outputs_.size()) {}
+      : buildLog_(build_log), explanations_(explanations), edge_(edge) {}
 
   /// Determines whether at least one output of edge 'edge_' is considered dirty.
   ///
@@ -133,11 +132,17 @@ class RecomputeOutputsDirtyCache {
   /// Returns true if dirty.
   bool Phony(Node* output, const Node* most_recent_input) const;
 
+  /// Returns whether 'edge_' has the "restat" binding set.
+  /// The binding is looked up on first use and cached.
+  bool is_restat();
+
   const BuildLog* const buildLog_;
   OptionalExplanations& explanations_;
   const Edge* const edge_;
 
-  const bool isRestat_ = edge_->GetBindingBool("restat");
+  bool isRestat_ = false;
+  bool is_restat_init_ = false;
+
   bool generator_ = false;
   bool generatorValid_ = false;
   std::vector<CachedLogEntry> logEntry_;
@@ -147,6 +152,15 @@ class RecomputeOutputsDirtyCache {
   std::vector<const Node*> checkOutputs_;
 #endif
 };
+
+bool RecomputeOutputsDirtyCache::is_restat() {
+  if (!is_restat_init_) {
+    is_restat_init_ = true;
+    isRestat_ = edge_->GetBindingBool("restat");
+  }
+
+  return isRestat_;
+}
 
 bool RecomputeOutputsDirtyCache::CachedLogEntry::LookupByOutput(
     const BuildLog* buildLog, const Node* output) {
@@ -162,6 +176,10 @@ bool RecomputeOutputsDirtyCache::CachedLogEntry::LookupByOutput(
 bool RecomputeOutputsDirtyCache::all(const Node* most_recent_input) {
   assert((checkOutputs_.assign(edge_->outputs_.begin(), edge_->outputs_.end()),
           true));
+
+  // Lazy allocation
+  if (!edge_->is_phony())
+    logEntry_.resize(edge_->outputs_.size());
 
   for (std::size_t i = 0; i != edge_->outputs_.size(); ++i) {
     const bool outputDirty =
@@ -179,7 +197,7 @@ bool RecomputeOutputsDirtyCache::depfile(const Node* most_recent_input) {
   // Precondition: RecomputeOutputsDirtyCache::all() was previously called
   // with the same edge_->outputs_ as used here.
   assert(std::equal(checkOutputs_.begin(), checkOutputs_.end(),
-                    edge_->outputs_.begin()));
+                    edge_->outputs_.begin(), edge_->outputs_.end()));
 
   for (std::size_t i = 0; i != edge_->outputs_.size(); ++i) {
     assert(!edge_->is_phony());
@@ -235,7 +253,7 @@ bool RecomputeOutputsDirtyCache::RecomputeOutputDirty(
   // output file's actual mtime and simply check the recorded mtime from
   // the log against the most recent input's mtime (see below)
   bool used_restat = false;
-  if (isRestat_ && buildLog_ && entry.LookupByOutput(buildLog_, output)) {
+  if (is_restat() && buildLog_ && entry.LookupByOutput(buildLog_, output)) {
     used_restat = true;
   }
 
