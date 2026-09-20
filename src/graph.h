@@ -468,6 +468,8 @@ struct DependencyScan {
   bool LoadDyndeps(Node* node, std::string* err) const;
   bool LoadDyndeps(Node* node, DyndepFile* ddf, std::string* err) const;
 
+  void RemoveExplanations(Edge* edge);
+
  private:
   bool RecomputeNodeDirty(Node* node, std::vector<Node*>* stack,
                           std::vector<Node*>* validation_nodes,
