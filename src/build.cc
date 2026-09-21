@@ -1330,3 +1330,12 @@ void Builder::SetFailureCode(ExitStatus code) {
     exit_code_ = code;
   }
 }
+
+const Explanations* Builder::getExplanations() const {
+  return explanations_.get();
+}
+
+void Builder::ClearExplanations() {
+  if (explanations_)
+    explanations_->clear();
+}
