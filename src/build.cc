@@ -21,6 +21,7 @@
 #include <stdlib.h>
 
 #include <functional>
+#include <sstream>
 #include <unordered_set>
 
 #if defined(__SVR4) && defined(__sun)
@@ -75,6 +76,116 @@ BuildResult DryRunCommandRunner::WaitForCommand() {
   finished_.pop();
 
   return BuildResult::CommandCompleted{ edge, status };
+}
+
+// RAII helper that marks a node as "on the current path" for the lifetime
+// of the guard. The flag is cleared again on every exit from the scope, which
+// turns the node from "in progress" into "fully explored".
+class SafePathGuard {
+ public:
+  explicit SafePathGuard(bool& on_path) : on_path_(on_path) { on_path_ = true; }
+  ~SafePathGuard() { on_path_ = false; }
+
+  SafePathGuard(const SafePathGuard&) = delete;
+  SafePathGuard& operator=(const SafePathGuard&) = delete;
+
+ private:
+  bool& on_path_;
+};
+
+class CycleDetection {
+ public:
+  /// Searches the graph reachable from `input` for a cycle.
+  ///
+  /// @param input Ranges of start nodes. The search begins at every node in
+  ///              these ranges and follows each node's outgoing edges.
+  /// @return The nodes of the first cycle found, in reverse traversal order.
+  ///         Empty if the sub-graph is acyclic.
+  static std::vector<const Node*> GetCycle(
+      const std::vector<EdgeInputsRange>& input);
+
+ private:
+  explicit CycleDetection(const std::vector<EdgeInputsRange>& input)
+      : root_(input) {}
+
+  void Start();
+  void Iterate(const Node* node);
+  bool CycleFound() const;
+
+  const std::vector<EdgeInputsRange>& root_;
+
+  // State of nodes: absent = unvisited, true = on the current path,
+  // false = fully explored. Meeting a `true` node twice means a cycle.
+  // Fully explored nodes are skipped so each path is checked only once.
+  std::unordered_map<const Node*, bool> node_state_;
+  std::vector<const Node*> cycle_;
+  const Node* cycle_start_ = nullptr;
+  bool cycle_complete_ = false;
+};
+
+std::vector<const Node*> CycleDetection::GetCycle(
+    const std::vector<EdgeInputsRange>& input) {
+  CycleDetection cycle(input);
+  cycle.Start();
+  return cycle.cycle_;
+}
+
+void CycleDetection::Start() {
+  for (const auto& range : root_) {
+    for (size_t i = 0; i < range.size(); ++i) {
+      Iterate(range[i]);
+      if (CycleFound())
+        return;
+    }
+  }
+}
+
+bool CycleDetection::CycleFound() const {
+  return cycle_start_ != nullptr;
+}
+
+void CycleDetection::Iterate(const Node* node) {
+  auto iter = node_state_.try_emplace(node);
+
+  if (!iter.second) {
+    // node already exist
+
+    if (iter.first->second) {
+      // Node is already on the current path, cycle detected.
+      cycle_start_ = node;
+      cycle_.push_back(node);
+      return;
+    } else {
+      // Skip nodes already fully explored via another path. If no cycle was
+      // found before, none will be found now.
+      return;
+    }
+  }
+
+  // Mark the node as "on the path". The guard resets the flag when this
+  // function returns, marking the node as fully explored.
+  SafePathGuard path_guard(iter.first->second);
+
+  for (const Edge* edge : node->out_edges()) {
+    for (const Node* next : edge->outputs_) {
+      Iterate(next);
+      if (CycleFound()) {
+        if (cycle_complete_)
+          return; // The cycle is already complete.
+
+        if (node == cycle_start_) {
+          // Reached the node that closes the cycle.
+          cycle_complete_ = true;
+          return;
+        }
+
+        // `node` lies on the path between the cycle start and the detection
+        // point, so it belongs to the cycle.
+        cycle_.push_back(node);
+        return;
+      }
+    }
+  }
 }
 
 }  // namespace
@@ -267,7 +378,9 @@ bool Plan::EdgeMaybeReady(map<Edge*, Want>::iterator want_e, string* err) {
 }
 
 bool Plan::CleanNode(DependencyScan* scan, Node* node,
-                     std::vector<Node*>* validation_nodes, string* err) {
+                     std::vector<Node*>* validation_nodes,
+                     std::vector<EdgeInputsRange>* cycle_detection_nodes,
+                     string* err) {
   using SkipEdge = DependencyScan::SkipEdge;
   using CleanEdge = DependencyScan::CleanEdge;
   using DirtyEdge = DependencyScan::DirtyEdge;
@@ -301,7 +414,8 @@ bool Plan::CleanNode(DependencyScan* scan, Node* node,
       }
 
       auto dirty_state = scan->RecomputeDirtyRestatInput(
-          out_edge, most_recent_input, validation_nodes, err);
+          out_edge, most_recent_input, validation_nodes, cycle_detection_nodes,
+          err);
       if (!dirty_state)
         return false;
 
@@ -317,7 +431,7 @@ bool Plan::CleanNode(DependencyScan* scan, Node* node,
         // remove 'out_edge' and its input edges from build plan
 
         for (auto o : out_edge->outputs_) {
-          if (!CleanNode(scan, o, validation_nodes, err))
+          if (!CleanNode(scan, o, validation_nodes, cycle_detection_nodes, err))
             return false;
         }
 
@@ -367,8 +481,39 @@ bool Plan::AddInputTargets(const EdgeInputsRange& new_inputs,
 
 bool Plan::CleanNode(DependencyScan* scan, Node* node, string* err) {
   std::vector<Node*> validation_nodes;
-  if (!CleanNode(scan, node, &validation_nodes, err))
+  std::vector<EdgeInputsRange> cycle_detection_nodes;
+  if (!CleanNode(scan, node, &validation_nodes, &cycle_detection_nodes, err))
     return false;
+
+  // check for a cycle.
+  const std::vector<const Node*> cycle =
+      CycleDetection::GetCycle(cycle_detection_nodes);
+  if (!cycle.empty()) {
+    // cycle detected
+
+    std::string_view output_node = [node]() -> std::string_view {
+      if (!node->out_edges().empty() &&
+          !node->out_edges().front()->outputs_.empty())
+        return node->out_edges().front()->outputs_.front()->path();
+      else
+        return "internal error";  // should never apply
+    }();
+
+    // prepare error message
+    std::stringstream err_stream(*err);
+    err_stream << "dependency cycle: ";
+
+    for (auto it = cycle.begin(); it != cycle.end(); ++it) {
+      err_stream << "'" << (*it)->path() << "' -> ";
+    }
+    err_stream << "'" << cycle.front()->path() << "'"
+               << "\nDetected after loading depfile for output '" << output_node
+               << "' due to restat input '" << node->path() << "'";
+
+    *err = err_stream.str();
+
+    return false;
+  }
 
   // Add any validation nodes as new top level targets.
   return AddValidationNodes(validation_nodes, err);
