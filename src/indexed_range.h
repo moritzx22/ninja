@@ -14,8 +14,45 @@
 #define NINJA_INDEXED_RANGE_H_
 
 #include <cstddef>
+#include <cstdio>
 #include <iterator>
+#include <string>
 #include <type_traits>
+#include <utility>
+
+#include "graph.h"
+
+// File and line of the code that constructs the IndexedRange. They are used
+// as default arguments of the constructor, so they are evaluated at the call
+// site. GCC and Clang provide this via __builtin_FILE()/__builtin_LINE();
+// other compilers report "<unknown>":0.
+#if defined(__GNUC__) || defined(__clang__)
+#define INDEXED_RANGE_FILE() __builtin_FILE()
+#define INDEXED_RANGE_LINE() __builtin_LINE()
+#else
+#define INDEXED_RANGE_FILE() "<unknown>"
+#define INDEXED_RANGE_LINE() 0
+#endif
+
+
+template <typename T>
+std::string printname(T a) {
+  return "unknown";
+}
+template <>
+inline std::string printname<int>(int a) {
+  return std::to_string(a);
+}
+
+template <>
+inline std::string printname<Edge*>(Edge* a) {
+  return a->rule().name();
+}
+
+template <>
+inline std::string printname<Node*>(Node* a) {
+  return a->path();
+}
 
 /// A range over a container that is addressed by index instead of by
 /// iterator.
@@ -64,6 +101,7 @@
 template <typename Container>
 class IndexedRange {
   using size_type = typename Container::size_type;
+  using container_iterator = decltype(std::declval<Container&>().begin());
 
   /// Iterator that holds the container and an index and resolves the element
   /// via container[index] on each dereference, so it survives reallocation of
@@ -82,8 +120,9 @@ class IndexedRange {
                                   typename Container::reference>::type;
     using iterator_category = std::input_iterator_tag;
 
-    iterator(Container& container, size_type index)
-        : container_(container), index_(index) {}
+    iterator(Container& container, size_type index, const char* file, int line)
+        : container_(container), index_(index), it_(container.begin() + index),
+          file_(file), line_(line) {}
 
     /// Looks up the element via operator[], so it is unaffected by any
     /// reallocation of the container since the iterator was created.
@@ -91,6 +130,24 @@ class IndexedRange {
 
     iterator& operator++() {
       ++index_;
+      ++it_;
+      // it_ must equal begin() + index_. If not, the container reallocated
+      // and it_ still points into the old storage.
+      const container_iterator expected = container_.begin() + index_;
+      if (it_ != expected) {
+        // Describe all elements currently in the container.
+        std::string content;
+        for (size_type i = 0; i < container_.size(); ++i) {
+          if (i != 0)
+            content += ", ";
+          content += printname(container_[i]);
+        }
+        std::printf(
+            "%s:%d: IndexedRange: iterator invalidation detected at index "
+            "%zu (container reallocated during traversal), elements: [%s]\n",
+            file_, line_, static_cast<size_t>(index_), content.c_str());
+        it_ = expected;
+      }
       return *this;
     }
 
@@ -105,21 +162,29 @@ class IndexedRange {
    private:
     Container& container_;
     size_type index_;
+    container_iterator it_;
+    const char* file_;
+    int line_;
   };
 
  public:
   /// Captures the container's current size as the end of the range.
-  explicit IndexedRange(Container& container)
-      : container_(container), size_(container.size()) {}
+  explicit IndexedRange(Container& container,
+                        const char* file = INDEXED_RANGE_FILE(),
+                        int line = INDEXED_RANGE_LINE())
+      : container_(container), size_(container.size()), file_(file),
+        line_(line) {}
 
   IndexedRange(Container&&) = delete;
 
-  iterator begin() const { return iterator(container_, 0); }
-  iterator end() const { return iterator(container_, size_); }
+  iterator begin() const { return iterator(container_, 0, file_, line_); }
+  iterator end() const { return iterator(container_, size_, file_, line_); }
 
  private:
   Container& container_;
   const size_type size_;
+  const char* file_;
+  int line_;
 };
 
 #endif  // NINJA_INDEXED_RANGE_H_
